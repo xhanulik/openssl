@@ -72,6 +72,7 @@ typedef enum OPTION_choice {
     OPT_ERR = -1,
     OPT_EOF = 0,
     OPT_CONFIG_FILE,
+    OPT_INPLACE,
     OPT_TEST_ENUM
 } OPTION_CHOICE;
 
@@ -109,6 +110,17 @@ static int memory_err_compare(EVP_TEST *t, const char *err,
     if (!r)
         t->err = err;
     return r;
+}
+
+/* Option specific for evp test */
+static int process_mode_in_place;
+
+static int evp_test_process_mode(char *mode) {
+    if (strcmp(mode, "inplace") == 0)
+        return 1;
+    else if (strcmp(mode, "both") == 0)
+        return 0;
+    return -1;
 }
 
 /*
@@ -714,7 +726,7 @@ static int cipher_test_parse(EVP_TEST *t, const char *keyword,
 }
 
 static int cipher_test_enc(EVP_TEST *t, int enc,
-                           size_t out_misalign, size_t inp_misalign, int frag)
+                           size_t out_misalign, size_t inp_misalign, int frag, int in_place)
 {
     CIPHER_DATA *expected = t->data;
     unsigned char *in, *expected_out, *tmp = NULL;
@@ -740,7 +752,7 @@ static int cipher_test_enc(EVP_TEST *t, int enc,
         expected_out = expected->plaintext;
         out_len = expected->plaintext_len;
     }
-    if (inp_misalign == (size_t)-1) {
+    if (in_place) {
         /* Exercise in-place encryption */
         tmp = OPENSSL_malloc(out_misalign + in_len + 2 * EVP_MAX_BLOCK_LENGTH);
         if (!tmp)
@@ -1056,7 +1068,7 @@ static int cipher_test_enc(EVP_TEST *t, int enc,
 static int cipher_test_run(EVP_TEST *t)
 {
     CIPHER_DATA *cdat = t->data;
-    int rv, frag = 0;
+    int rv, frag = 0, in_place = 1;
     size_t out_misalign, inp_misalign;
 
     if (!cdat->key) {
@@ -1074,12 +1086,13 @@ static int cipher_test_run(EVP_TEST *t)
         t->err = "NO_TAG";
         return 0;
     }
+
     for (out_misalign = 0; out_misalign <= 1;) {
         static char aux_err[64];
         t->aux_err = aux_err;
-        for (inp_misalign = (size_t)-1; inp_misalign != 2; inp_misalign++) {
-            if (inp_misalign == (size_t)-1) {
-                /* kludge: inp_misalign == -1 means "exercise in-place" */
+
+        for (inp_misalign = 0; inp_misalign != 2; inp_misalign++) {
+            if (in_place) {
                 BIO_snprintf(aux_err, sizeof(aux_err),
                              "%s in-place, %sfragmented",
                              out_misalign ? "misaligned" : "aligned",
@@ -1092,7 +1105,7 @@ static int cipher_test_run(EVP_TEST *t)
                              frag ? "" : "not ");
             }
             if (cdat->enc) {
-                rv = cipher_test_enc(t, 1, out_misalign, inp_misalign, frag);
+                rv = cipher_test_enc(t, 1, out_misalign, inp_misalign, frag, in_place);
                 /* Not fatal errors: return */
                 if (rv != 1) {
                     if (rv < 0)
@@ -1101,7 +1114,7 @@ static int cipher_test_run(EVP_TEST *t)
                 }
             }
             if (cdat->enc != 1) {
-                rv = cipher_test_enc(t, 0, out_misalign, inp_misalign, frag);
+                rv = cipher_test_enc(t, 0, out_misalign, inp_misalign, frag, in_place);
                 /* Not fatal errors: return */
                 if (rv != 1) {
                     if (rv < 0)
@@ -1109,9 +1122,15 @@ static int cipher_test_run(EVP_TEST *t)
                     return 1;
                 }
             }
+            if (in_place)
+                break;
         }
 
-        if (out_misalign == 1 && frag == 0) {
+        if (out_misalign == 1 && in_place == 1 && process_mode_in_place == 0) {
+            /* In-place processing tested, continue with alignment tests */
+            in_place = 0;
+            out_misalign = 0;
+        } else if (out_misalign == 1 && frag == 0) {
             /*
              * XTS, SIV, CCM, stitched ciphers and Wrap modes have special
              * requirements about input lengths so we don't fragment for those
@@ -1127,6 +1146,7 @@ static int cipher_test_run(EVP_TEST *t)
                 || EVP_CIPHER_get_mode(cdat->cipher) == EVP_CIPH_WRAP_MODE)
                 break;
             out_misalign = 0;
+            in_place = 1;
             frag++;
         } else {
             out_misalign++;
@@ -4070,6 +4090,7 @@ const OPTIONS *test_get_options(void)
         OPT_TEST_OPTIONS_WITH_EXTRA_USAGE("[file...]\n"),
         { "config", OPT_CONFIG_FILE, '<',
           "The configuration file to use for the libctx" },
+        { "process", OPT_INPLACE, 's', "Mode for data processing by cipher tests [inplace/both], both by default"},
         { OPT_HELP_STR, 1, '-', "file\tFile to run tests on.\n" },
         { NULL }
     };
@@ -4087,6 +4108,10 @@ int setup_tests(void)
         switch (o) {
         case OPT_CONFIG_FILE:
             config_file = opt_arg();
+            break;
+        case OPT_INPLACE:
+            if ((process_mode_in_place = evp_test_process_mode(opt_arg())) == -1)
+                return 0;
             break;
         case OPT_TEST_CASES:
            break;
