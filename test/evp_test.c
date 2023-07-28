@@ -1065,10 +1065,26 @@ static int cipher_test_enc(EVP_TEST *t, int enc,
     return ok;
 }
 
+static int cipher_test_valid_fragmentation(CIPHER_DATA *cdat) {
+    /*
+     * XTS, SIV, CCM, stitched ciphers and Wrap modes have special
+     * requirements about input lengths so we don't fragment for those
+     */
+    return (cdat->aead == EVP_CIPH_CCM_MODE
+            || cdat->aead == EVP_CIPH_CBC_MODE
+            || (cdat->aead == -1
+                && EVP_CIPHER_get_mode(cdat->cipher) == EVP_CIPH_STREAM_CIPHER)
+            || ((EVP_CIPHER_get_flags(cdat->cipher) & EVP_CIPH_FLAG_CTS) != 0)
+            || EVP_CIPHER_get_mode(cdat->cipher) == EVP_CIPH_SIV_MODE
+            || EVP_CIPHER_get_mode(cdat->cipher) == EVP_CIPH_GCM_SIV_MODE
+            || EVP_CIPHER_get_mode(cdat->cipher) == EVP_CIPH_XTS_MODE
+            || EVP_CIPHER_get_mode(cdat->cipher) == EVP_CIPH_WRAP_MODE) ? 0 : 1;
+}
+
 static int cipher_test_run(EVP_TEST *t)
 {
     CIPHER_DATA *cdat = t->data;
-    int rv, frag = 0, in_place = 1;
+    int rv, frag, in_place;
     size_t out_misalign, inp_misalign;
 
     if (!cdat->key) {
@@ -1087,69 +1103,58 @@ static int cipher_test_run(EVP_TEST *t)
         return 0;
     }
 
-    for (out_misalign = 0; out_misalign <= 1;) {
+    for (in_place = 1; in_place >= 0; in_place--) {
         static char aux_err[64];
         t->aux_err = aux_err;
-
-        for (inp_misalign = 0; inp_misalign != 2; inp_misalign++) {
-            if (in_place) {
-                BIO_snprintf(aux_err, sizeof(aux_err),
-                             "%s in-place, %sfragmented",
-                             out_misalign ? "misaligned" : "aligned",
-                             frag ? "" : "not ");
-            } else {
-                BIO_snprintf(aux_err, sizeof(aux_err),
-                             "%s output and %s input, %sfragmented",
-                             out_misalign ? "misaligned" : "aligned",
-                             inp_misalign ? "misaligned" : "aligned",
-                             frag ? "" : "not ");
-            }
-            if (cdat->enc) {
-                rv = cipher_test_enc(t, 1, out_misalign, inp_misalign, frag, in_place);
-                /* Not fatal errors: return */
-                if (rv != 1) {
-                    if (rv < 0)
-                        return 0;
-                    return 1;
-                }
-            }
-            if (cdat->enc != 1) {
-                rv = cipher_test_enc(t, 0, out_misalign, inp_misalign, frag, in_place);
-                /* Not fatal errors: return */
-                if (rv != 1) {
-                    if (rv < 0)
-                        return 0;
-                    return 1;
-                }
-            }
-            if (in_place)
-                break;
+        if (process_mode_in_place == 1 && in_place == 0) {
+            /* Test only in-place data processing */
+            break;
         }
 
-        if (out_misalign == 1 && in_place == 1 && process_mode_in_place == 0) {
-            /* In-place processing tested, continue with alignment tests */
-            in_place = 0;
-            out_misalign = 0;
-        } else if (out_misalign == 1 && frag == 0) {
-            /*
-             * XTS, SIV, CCM, stitched ciphers and Wrap modes have special
-             * requirements about input lengths so we don't fragment for those
-             */
-            if (cdat->aead == EVP_CIPH_CCM_MODE
-                || cdat->aead == EVP_CIPH_CBC_MODE
-                || (cdat->aead == -1
-                    && EVP_CIPHER_get_mode(cdat->cipher) == EVP_CIPH_STREAM_CIPHER)
-                || ((EVP_CIPHER_get_flags(cdat->cipher) & EVP_CIPH_FLAG_CTS) != 0)
-                || EVP_CIPHER_get_mode(cdat->cipher) == EVP_CIPH_SIV_MODE
-                || EVP_CIPHER_get_mode(cdat->cipher) == EVP_CIPH_GCM_SIV_MODE
-                || EVP_CIPHER_get_mode(cdat->cipher) == EVP_CIPH_XTS_MODE
-                || EVP_CIPHER_get_mode(cdat->cipher) == EVP_CIPH_WRAP_MODE)
+        for (frag = 0; frag <= 1; frag++) {
+            if (frag == 1 && cipher_test_valid_fragmentation(cdat) == 0) {
                 break;
-            out_misalign = 0;
-            in_place = 1;
-            frag++;
-        } else {
-            out_misalign++;
+            }
+
+            for (out_misalign = 0; out_misalign <= 1; out_misalign++) {
+                for (inp_misalign = 0; inp_misalign <= 1; inp_misalign++) {
+                    if (inp_misalign == 1 && in_place == 1) {
+                        /* Skip input misalignment testing for in-place processing */
+                        break;
+                    }
+
+                    if (in_place) {
+                        BIO_snprintf(aux_err, sizeof(aux_err),
+                                        "%s in-place, %sfragmented",
+                                        out_misalign ? "misaligned" : "aligned",
+                                        frag ? "" : "not ");
+                    } else {
+                        BIO_snprintf(aux_err, sizeof(aux_err),
+                                        "%s output and %s input, %sfragmented",
+                                        out_misalign ? "misaligned" : "aligned",
+                                        inp_misalign ? "misaligned" : "aligned",
+                                        frag ? "" : "not ");
+                    }
+                    if (cdat->enc) {
+                        rv = cipher_test_enc(t, 1, out_misalign, inp_misalign, frag, in_place);
+                        /* Not fatal errors: return */
+                        if (rv != 1) {
+                            if (rv < 0)
+                                return 0;
+                            return 1;
+                        }
+                    }
+                    if (cdat->enc != 1) {
+                        rv = cipher_test_enc(t, 0, out_misalign, inp_misalign, frag, in_place);
+                        /* Not fatal errors: return */
+                        if (rv != 1) {
+                            if (rv < 0)
+                                return 0;
+                            return 1;
+                        }
+                    }
+                }
+            }
         }
     }
     t->aux_err = NULL;
