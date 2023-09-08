@@ -74,6 +74,7 @@ typedef enum OPTION_choice {
     OPT_CONFIG_FILE,
     OPT_IN_PLACE,
     OPT_PROVIDER_NAME,
+    OPT_PROV_PROPQUERY,
     OPT_TEST_ENUM
 } OPTION_CHOICE;
 
@@ -116,6 +117,7 @@ static int memory_err_compare(EVP_TEST *t, const char *err,
 
 /* Option specific for evp test */
 static int process_mode_in_place;
+static const char *propquery = NULL;
 
 static int evp_test_process_mode(char *mode)
 {
@@ -367,7 +369,7 @@ static int digest_test_init(EVP_TEST *t, const char *alg)
         return 1;
     }
 
-    if ((digest = fetched_digest = EVP_MD_fetch(libctx, alg, NULL)) == NULL
+    if ((digest = fetched_digest = EVP_MD_fetch(libctx, alg, propquery)) == NULL
         && (digest = EVP_get_digestbyname(alg)) == NULL)
         return 0;
     if (!TEST_ptr(mdat = OPENSSL_zalloc(sizeof(*mdat))))
@@ -596,7 +598,7 @@ static int cipher_test_init(EVP_TEST *t, const char *alg)
     }
 
     ERR_set_mark();
-    if ((cipher = fetched_cipher = EVP_CIPHER_fetch(libctx, alg, NULL)) == NULL
+    if ((cipher = fetched_cipher = EVP_CIPHER_fetch(libctx, alg, propquery)) == NULL
         && (cipher = EVP_get_cipherbyname(alg)) == NULL) {
         /* a stitched cipher might not be available */
         if (strstr(alg, "HMAC") != NULL) {
@@ -1223,7 +1225,7 @@ static int mac_test_init(EVP_TEST *t, const char *alg)
         t->skip = 1;
         return 1;
     }
-    if ((mac = EVP_MAC_fetch(libctx, alg, NULL)) == NULL) {
+    if ((mac = EVP_MAC_fetch(libctx, alg, propquery)) == NULL) {
         /*
          * Since we didn't find an EVP_MAC, we check for known EVP_PKEY methods
          * For debugging purposes, we allow 'NNNN by EVP_PKEY' to force running
@@ -1400,7 +1402,7 @@ static int mac_test_run_pkey(EVP_TEST *t)
             t->err = NULL;
             goto err;
         }
-        if (!TEST_ptr(cipher = EVP_CIPHER_fetch(libctx, expected->alg, NULL))) {
+        if (!TEST_ptr(cipher = EVP_CIPHER_fetch(libctx, expected->alg, propquery))) {
             t->err = "MAC_KEY_CREATE_ERROR";
             goto err;
         }
@@ -1773,7 +1775,7 @@ static int pkey_test_init(EVP_TEST *t, const char *name,
         return 0;
     }
     kdata->keyop = keyop;
-    if (!TEST_ptr(kdata->ctx = EVP_PKEY_CTX_new_from_pkey(libctx, pkey, NULL))) {
+    if (!TEST_ptr(kdata->ctx = EVP_PKEY_CTX_new_from_pkey(libctx, pkey, propquery))) {
         EVP_PKEY_free(pkey);
         OPENSSL_free(kdata);
         return 0;
@@ -2272,7 +2274,7 @@ static int pbe_test_run(EVP_TEST *t)
 #endif
     } else if (expected->pbe_type == PBE_TYPE_PKCS12) {
         fetched_digest = EVP_MD_fetch(libctx, EVP_MD_get0_name(expected->md),
-                                      NULL);
+                                      propquery);
         if (fetched_digest == NULL) {
             t->err = "PKCS12_ERROR";
             goto err;
@@ -2512,7 +2514,7 @@ static int rand_test_init(EVP_TEST *t, const char *name)
     if (!EVP_RAND_CTX_set_params(rdata->parent, params))
         goto err;
 
-    rand = EVP_RAND_fetch(libctx, name, NULL);
+    rand = EVP_RAND_fetch(libctx, name, propquery);
     if (rand == NULL)
         goto err;
     rdata->ctx = EVP_RAND_CTX_new(rand, rdata->parent);
@@ -2764,7 +2766,7 @@ static int kdf_test_init(EVP_TEST *t, const char *name)
     kdata->p = kdata->params;
     *kdata->p = OSSL_PARAM_construct_end();
 
-    kdf = EVP_KDF_fetch(libctx, name, NULL);
+    kdf = EVP_KDF_fetch(libctx, name, propquery);
     if (kdf == NULL) {
         OPENSSL_free(kdata);
         return 0;
@@ -2973,7 +2975,7 @@ static int pkey_kdf_test_init(EVP_TEST *t, const char *name)
     if (!TEST_ptr(kdata = OPENSSL_zalloc(sizeof(*kdata))))
         return 0;
 
-    kdata->ctx = EVP_PKEY_CTX_new_from_name(libctx, name, NULL);
+    kdata->ctx = EVP_PKEY_CTX_new_from_name(libctx, name, propquery);
     if (kdata->ctx == NULL
         || EVP_PKEY_derive_init(kdata->ctx) <= 0)
         goto err;
@@ -3201,7 +3203,7 @@ static int keygen_test_init(EVP_TEST *t, const char *alg)
         t->skip = 1;
         return 1;
     }
-    if (!TEST_ptr(genctx = EVP_PKEY_CTX_new_from_name(libctx, alg, NULL)))
+    if (!TEST_ptr(genctx = EVP_PKEY_CTX_new_from_name(libctx, alg, propquery)))
         goto err;
 
     if (EVP_PKEY_keygen_init(genctx) <= 0) {
@@ -4101,6 +4103,7 @@ const OPTIONS *test_get_options(void)
         OPT_SECTION("Provider"), \
         { "provider", OPT_PROVIDER_NAME, 's',
           "The provider to load (The default value is 'default')" },
+        { "propquery", OPT_PROV_PROPQUERY, 's', "Property query used when fetching algorithms" },
         OPT_SECTION("Files"), \
         { OPT_HELP_STR, 1, '-', "file\tFile to run tests on.\n" },
         { NULL }
@@ -4127,6 +4130,9 @@ int setup_tests(void)
             break;
         case OPT_PROVIDER_NAME:
             provider_name = opt_arg();
+            break;
+        case OPT_PROV_PROPQUERY:
+            propquery = opt_arg();
             break;
         case OPT_TEST_CASES:
             break;
