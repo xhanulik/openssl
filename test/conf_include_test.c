@@ -68,6 +68,7 @@ static int change_path(const char *file)
 static CONF *conf;
 static BIO *in;
 static int expect_failure = 0;
+static int test_providers = 0;
 
 static int test_load_config(void)
 {
@@ -174,10 +175,29 @@ static int test_check_overflow(void)
     return 1;
 }
 
+static int test_activated_providers(void)
+{
+    long val = 0;
+
+    if (!TEST_int_eq(NCONF_get_number(conf, "default_sect", "activate", &val), 1)
+        || !TEST_int_eq(val, 1)) {
+        TEST_note("default provider not activated");
+        return 0;
+    }
+
+        if (!TEST_int_eq(NCONF_get_number(conf, "legacy_sect", "activate", &val), 1)
+        || !TEST_int_eq(val, 1)) {
+        TEST_note("legacy provider not activated");
+        return 0;
+    }
+    return 1;
+}
+
 typedef enum OPTION_choice {
     OPT_ERR = -1,
     OPT_EOF = 0,
     OPT_FAIL,
+    OPT_TEST_PROV,
     OPT_TEST_ENUM
 } OPTION_CHOICE;
 
@@ -186,6 +206,7 @@ const OPTIONS *test_get_options(void)
     static const OPTIONS test_options[] = {
         OPT_TEST_OPTIONS_WITH_EXTRA_USAGE("conf_file\n"),
         { "f", OPT_FAIL, '-', "A failure is expected" },
+        { "providers", OPT_TEST_PROV, '-', "Test for activated default and legacy providers"},
         { NULL }
     };
     return test_options;
@@ -204,6 +225,8 @@ int setup_tests(void)
         case OPT_FAIL:
             expect_failure = 1;
             break;
+        case OPT_TEST_PROV:
+            test_providers = 1;
         case OPT_TEST_CASES:
             break;
         default:
@@ -227,6 +250,8 @@ int setup_tests(void)
     ADD_TEST(test_load_config);
     ADD_TEST(test_check_null_numbers);
     ADD_TEST(test_check_overflow);
+    if (test_providers != 0)
+        ADD_TEST(test_activated_providers);
     return 1;
 }
 

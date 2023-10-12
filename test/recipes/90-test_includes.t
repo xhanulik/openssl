@@ -13,7 +13,7 @@ plan skip_all => "test_includes doesn't work without posix-io"
 delete $ENV{OPENSSL_CONF_INCLUDE};
 
 plan tests =>                   # The number of tests being performed
-    6
+    8
     + ($^O eq "VMS" ? 2 : 0);
 
 ok(run(test(["conf_include_test", data_file("includes.cnf")])), "test directory includes");
@@ -28,3 +28,5 @@ if ($^O eq "VMS") {
 }
 ok(run(test(["conf_include_test", "-f", data_file("includes-broken.cnf")])), "test broken includes");
 ok(run(test(["conf_include_test",  "-f", data_file("incdir.cnf")])), "test includedir");
+ok(run(test(["conf_include_test", "-providers", data_file("includes-prov.cnf")])), "test direct provider config include");
+ok(run(test(["conf_include_test", "-providers", data_file("includes-prov-dir.cnf")])), "test directory includes with provider configs");

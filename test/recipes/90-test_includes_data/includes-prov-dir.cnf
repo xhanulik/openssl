@@ -1,0 +1,11 @@
+#
+# Example configuration file using includes to load providers.
+#
+
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+
+.include conf-includes-prov
+.include conf-includes
