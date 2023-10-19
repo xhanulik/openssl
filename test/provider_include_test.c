@@ -10,10 +10,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <openssl/provider.h>
-#include <openssl/params.h>
-#include <openssl/core_names.h>
-#include <openssl/self_test.h>
-#include <openssl/evp.h>
+#include <openssl/crypto.h>
 #include "testutil.h"
 
 #ifdef _WIN32
@@ -43,6 +40,7 @@ typedef enum OPTION_choice {
     OPT_ERR = -1,
     OPT_EOF = 0,
     OPT_FAIL,
+    OPT_LEGACY,
     OPT_TEST_ENUM
 } OPTION_CHOICE;
 
@@ -95,11 +93,22 @@ static int test_include_default_provider(void)
     return 1;
 }
 
+static int test_include_legacy_provider(void)
+{
+    if (OSSL_PROVIDER_available(libctx, "legacy") != 1) {
+        opt_printf_stderr("Legacy provider is missing\n");
+        return 0;
+    }
+    return 1;
+}
+
 const OPTIONS *test_get_options(void)
 {
     static const OPTIONS test_options[] = {
         OPT_TEST_OPTIONS_WITH_EXTRA_USAGE("config_file\n"),
         { "f", OPT_FAIL, '-', "A failure is expected" },
+        { "legacy", OPT_LEGACY, '-',
+          "Test availability of legacy provider" },
         { NULL }
     };
     return test_options;
@@ -109,12 +118,16 @@ int setup_tests(void)
 {
     OPTION_CHOICE o;
     char *config_file = NULL;
+    int legacy_enabled = 0;
 
     while ((o = opt_next()) != OPT_EOF) {
         switch (o) {
         case OPT_FAIL:
             expect_failure = 1;
         break;
+        case OPT_LEGACY:
+            legacy_enabled = 1;
+            break;
         case OPT_TEST_CASES:
            break;
         default:
@@ -144,6 +157,8 @@ int setup_tests(void)
     OPENSSL_free(config_file);
 
     ADD_TEST(test_include_default_provider);
+    if (legacy_enabled)
+        ADD_TEST(test_include_legacy_provider);
     return 1;
 }
 
